@@ -216,7 +216,7 @@ function plantSVG(pl) {
 
 function render() {
   const d = Math.min(ST.day, DAYS);
-  document.getElementById('day').textContent = ST.done ? '一个月了。' : '第 ' + d + ' 天，' + ST.w[d - 1] + '。';
+  document.getElementById('day').textContent = ST.done ? '一个月了。' : '第 ' + d + ' 天。' + (d > 1 ? '昨天' + ST.w[d - 2] + '，' : '') + '今天' + ST.w[d - 1] + '。';  // 06:34 加'昨天'：郭网2 等六个人里四个对不上'标题下雨土却晚一天湿'
   const yard = document.getElementById('yard');
   yard.innerHTML = '';
   ST.p.forEach(function (pl, i) {
