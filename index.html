@@ -29,6 +29,8 @@
   #end td.fin { width: auto; text-align: left; padding-left: 10px; white-space: nowrap; }
   #end tr.act td { color: #7a4b16; font-size: 12px; height: 15px; }
   #end tr.gap td { height: 10px; }
+  #end button.wo { border: none; background: none; padding: 0; font-size: 12px; color: #7a4b16; cursor: pointer; text-decoration: underline dotted; }
+  #end button.wo.on { background: #f0d9a8; border-radius: 2px; }
   .k { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin: 0 2px 0 8px; border-radius: 2px; }
   #again { margin-top: 10px; }
 </style>
@@ -90,7 +92,7 @@ function newState(seed) {
   }
   const acts = [], leaves = [];
   for (let i = 0; i < N; i++) { acts.push({}); leaves.push({}); }
-  return { seed: seed, day: 1, w: weatherFor(seed), p: p, spare: SPARE, done: false, acts: acts, leaves: leaves };
+  return { seed: seed, day: 1, w: weatherFor(seed), p: p, spare: SPARE, done: false, acts: acts, leaves: leaves, log: [] };
 }
 
 function shownR(pl) { return pl.hist.length > LAG ? pl.hist[pl.hist.length - 1 - LAG] : pl.hist[0]; }
@@ -172,10 +174,6 @@ function control(seed) {
   return c;
 }
 
-function mark(i, what) {
-  const a = ST.acts[i];
-  (a[ST.day] = a[ST.day] || []).push(what);
-}
 
 function say(text) {
   const log = document.getElementById('log');
@@ -245,34 +243,53 @@ function render() {
     '备用的苗还有 ' + ST.spare + ' 棵，第 ' + LAST_REPLANT + ' 天以后就换不了了' : '';
 }
 
-function doAct(a, i) {
-  if (ST.done) return;
-  const pl = ST.p[i];
+// 06:40 拆成 applyAct（只改状态、返回要说的话）和 doAct（说、画）：结尾要拿同一套规矩重放"少了那一下"
+function applyAct(st, a, i) {
+  const pl = st.p[i];
+  const mk = function (what) { const A = st.acts[i]; (A[st.day] = A[st.day] || []).push(what); st.log.push({ d: st.day, i: i, a: a }); };
   if (a === '浇') {
-    pl.m = Math.min(12, pl.m + 3); mark(i, '浇');
-    say('浇了 ' + (i + 1) + '号。土：' + soilWord(pl.m));
+    pl.m = Math.min(12, pl.m + 3); mk('浇');
+    return '浇了 ' + (i + 1) + '号。土：' + soilWord(pl.m);
   } else if (a === '挖') {
-    if (pl.dead && shownR(pl) <= 0) { say((i + 1) + '号已经干了。'); return; }
+    if (pl.dead && shownR(pl) <= 0) return (i + 1) + '号已经干了。';
     const s = roots(pl);
     if (!pl.dead) { pl.R -= 1.2; if (pl.R <= 0) pl.R = 0.01; }
-    pl.loose = 3; mark(i, '挖');
-    say('扒开 ' + (i + 1) + '号根边上的土看：' + s + '。看完又把土拢回去了，土是松的。');
+    pl.loose = 3; mk('挖');
+    return '扒开 ' + (i + 1) + '号根边上的土看：' + s + '。看完又把土拢回去了，土是松的。';
   } else if (a === '摇') {
     const firm = pl.R >= 4;
     if (!pl.dead) { pl.R -= 0.8; if (pl.R <= 0) pl.R = 0.01; }
-    mark(i, '摇');
-    say('捏着 ' + (i + 1) + '号的干晃了晃：' + (firm ? '晃不动，扎得挺稳。' : '底下有点活动。'));
+    mk('摇');
+    return '捏着 ' + (i + 1) + '号的干晃了晃：' + (firm ? '晃不动，扎得挺稳。' : '底下有点活动。');
   } else if (a === '补') {
-    if (ST.spare <= 0) { say('备用的苗没了。'); return; }
-    if (ST.day > LAST_REPLANT) { say('这时候再换，一个月里长不起来了，备用的苗留着吧。'); return; }
+    if (st.spare <= 0) return '备用的苗没了。';
+    if (st.day > LAST_REPLANT) return '这时候再换，一个月里长不起来了，备用的苗留着吧。';
     const s = roots(pl);
-    ST.spare -= 1;
+    st.spare -= 1;
     const np = newPlant(5.0, Math.max(pl.m, 6), 10, false, pl.gen + 1);
     np.loose = 3;
-    ST.p[i] = np; mark(i, '补');
-    say('把 ' + (i + 1) + '号拔了，拔出来看根：' + s + '。换上一棵新苗，浇透了。备用的还有 ' + ST.spare + ' 棵。');
+    st.p[i] = np; mk('补');
+    return '把 ' + (i + 1) + '号拔了，拔出来看根：' + s + '。换上一棵新苗，浇透了。备用的还有 ' + st.spare + ' 棵。';
   }
+  return null;
+}
+
+function doAct(a, i) {
+  if (ST.done) return;
+  const msg = applyAct(ST, a, i);
+  if (msg) say(msg);
   render();
+}
+
+// 同一个月、同样的手，只少第 skipD 天对 skipI 号动的那几下（第四个、郭网2 想要的"只差你那一下"）
+function without(skipI, skipD) {
+  const c = newState(ST.seed);
+  while (c.day <= DAYS) {
+    const d = c.day;
+    ST.log.forEach(function (e) { if (e.d === d && !(e.i === skipI && e.d === skipD)) applyAct(c, e.a, e.i); });
+    stepDay(c);
+  }
+  return c;
 }
 
 function pass(k) {
@@ -288,7 +305,7 @@ function pass(k) {
 function finish() {
   CTRL = control(ST.seed);
   const end = document.getElementById('end');
-  let h = '<p>每一号两行，一天一格是那天的叶子：上面一行是你的，下面一行是同样的天气、同样的苗、谁也没碰的。你那一行上头标着那天你动的手（水＝浇　挖＝挖　摇＝摇　换＝换了一棵）。</p>';
+  let h = '<p>每一号两行，一天一格是那天的叶子：上面一行是你的，下面一行是同样的天气、同样的苗、谁也没碰的。你那一行上头标着那天你动的手（水＝浇　挖＝挖　摇＝摇　换＝换了一棵）。点一个这样的字，底下多一行：别的都照你做的，只少那一天那一下。</p>';
   h += '<p style="font-size:13px;color:#555">';
   [['深绿，挺', 8], ['绿', 6], ['有点软', 4], ['耷拉', 2.5], ['黄了', 1], ['干了', 0]].forEach(function (x) {
     h += '<span class="k" style="background:' + leafColor(x[1]) + '"></span>' + x[0];
@@ -307,13 +324,13 @@ function finish() {
       else if (a.indexOf('挖') >= 0) c = '挖';
       else if (a.indexOf('摇') >= 0) c = '摇';
       else if (a.indexOf('浇') >= 0) c = '水';
-      h += '<td>' + c + '</td>';
+      h += '<td>' + (c ? '<button class="wo" data-i="' + i + '" data-d="' + d + '">' + c + '</button>' : '') + '</td>';
     }
     h += '<td></td></tr><tr><td class="lab">' + (i + 1) + '号 你的</td>';
     for (let d = 1; d <= DAYS; d++) h += lc(ST.leaves, i, d, CTRL.p[i].hist[0]);
     h += '<td class="fin">' + fin(ST.p[i]) + '</td></tr><tr><td class="lab">没碰的</td>';
     for (let d = 1; d <= DAYS; d++) h += lc(CTRL.leaves, i, d, CTRL.p[i].hist[0]);
-    h += '<td class="fin">' + fin(CTRL.p[i]) + '</td></tr><tr class="gap"><td></td></tr>';
+    h += '<td class="fin">' + fin(CTRL.p[i]) + '</td></tr><tr id="wo' + i + '" style="display:none"></tr><tr class="gap"><td></td></tr>';
   }
   h += '<tr><td class="lab">天气</td>';
   for (let d = 1; d <= DAYS; d++) h += '<td style="font-size:11px;color:#666">' + ST.w[d - 1] + '</td>';
@@ -321,6 +338,18 @@ function finish() {
   h += '<div id="again"><button id="same">同样的一个月再来一回</button> <button id="other">换一个月</button></div>';
   end.innerHTML = h;
   end.style.display = 'block';
+  end.querySelectorAll('button.wo').forEach(function (b) {
+    b.onclick = function () {
+      const i = +b.dataset.i, d = +b.dataset.d, c = without(i, d);
+      const what = (ST.acts[i][d] || []).length > 1 ? '动的那几下' : ({ '水': '浇的水', '挖': '挖的那一下', '摇': '摇的那一下', '换': '换的那一棵' }[b.textContent] || '那一下');
+      let r = '<td class="lab">少了第 ' + d + ' 天' + what + '</td>';
+      for (let dd = 1; dd <= DAYS; dd++) r += lc(c.leaves, i, dd, c.p[i].hist[0]);
+      r += '<td class="fin">' + fin(c.p[i]) + '</td>';
+      const row = document.getElementById('wo' + i);
+      row.innerHTML = r; row.style.display = '';
+      end.querySelectorAll('button.wo[data-i="' + i + '"]').forEach(function (x) { x.classList.toggle('on', x === b); });
+    };
+  });
   document.getElementById('same').onclick = function () { start(ST.seed); };
   document.getElementById('other').onclick = function () { start(1 + Math.floor(Math.random() * 99999)); };
   end.scrollIntoView({ behavior: 'smooth' });

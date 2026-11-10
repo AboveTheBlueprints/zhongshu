@@ -15,7 +15,11 @@ async def render(b, d):
         k2 = k.strip().replace('　', ' ')
         exact = None
         import re
-        m = re.match(r'^(\d+)\s*号\s*(.+)$', k2)
+        m2 = re.match(r'^(\d+)\s*号\s*第\s*(\d+)\s*天$', k2)   # 06:40 结尾表上的字：'1号 第5天' 点 1 号你那行第 5 天上头那个字
+        if m2:
+            loc = pg.locator('#end button.wo[data-i="%d"][data-d="%d"]' % (int(m2.group(1)) - 1, int(m2.group(2))))
+            if await loc.count(): exact = loc.first
+        m = None if m2 else re.match(r'^(\d+)\s*号\s*(.+)$', k2)
         if m:
             loc = pg.locator('#yard .plot').nth(int(m.group(1)) - 1).locator('button')
             if int(m.group(1)) >= 1 and int(m.group(1)) <= await pg.locator('#yard .plot').count():
