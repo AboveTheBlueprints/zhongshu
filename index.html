@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>种树</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", sans-serif; background: #f4f0e6; color: #2b2a26; margin: 0; padding: 18px; }
+  #wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  #sub { color: #777; font-size: 14px; margin-bottom: 14px; }
+  #day { font-size: 17px; margin: 8px 0 10px; }
+  #yard { display: flex; gap: 10px; justify-content: space-between; }
+  .plot { flex: 1; background: #fbf8f0; border: 1px solid #ddd5c2; border-radius: 6px; padding: 8px 6px; text-align: center; }
+  .plot svg { width: 100%; height: 180px; display: block; }
+  .info { font-size: 13px; line-height: 1.55; min-height: 62px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-top: 6px; }
+  button { font: inherit; font-size: 13px; padding: 4px 9px; border: 1px solid #b9ae95; background: #fff; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #f0ead9; }
+  button:disabled { color: #bbb; border-color: #ddd; cursor: default; background: #fafafa; }
+  #bar { margin: 14px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #bar button { font-size: 15px; padding: 6px 14px; }
+  #log { background: #fffdf7; border: 1px solid #e3dccb; border-radius: 6px; padding: 8px 12px; font-size: 14px; line-height: 1.7; max-height: 210px; overflow-y: auto; }
+  #log .d { color: #999; }
+  #end { display: none; margin-top: 16px; }
+  #end table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  #end td { width: 19px; height: 19px; text-align: center; padding: 0; }
+  #end td.lab { width: auto; text-align: right; padding-right: 8px; white-space: nowrap; color: #555; }
+  #end td.fin { width: auto; text-align: left; padding-left: 10px; white-space: nowrap; }
+  #end tr.act td { color: #7a4b16; font-size: 12px; height: 15px; }
+  #end tr.gap td { height: 10px; }
+  .k { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin: 0 2px 0 8px; border-radius: 2px; }
+  #again { margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>种树</h1>
+  <div id="sub">院子边上新栽了五棵小树苗，一个月以后再看。</div>
+  <div id="day"></div>
+  <div id="yard"></div>
+  <div id="bar">
+    <button id="b1">过一天</button>
+    <button id="b3">过三天</button>
+    <span id="spare" style="color:#777;font-size:14px"></span>
+  </div>
+  <div id="log"></div>
+  <div id="end"></div>
+</div>
+<script>
+const DAYS = 30, LAG = 3, N = 5, SPARE = 2, LAST_REPLANT = 20;
+
+function rng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function randint(r, a, b) { return a + Math.floor(r() * (b - a + 1)); }
+
+function weatherFor(seed) {
+  const r = rng(seed * 7919 + 13);
+  const w = [];
+  for (let d = 0; d < DAYS; d++) {
+    const x = r();
+    w.push(x < 0.22 ? '雨' : (x < 0.5 ? '阴' : '晴'));
+  }
+  const a = randint(r, 9, 12), b = a + randint(r, 7, 8);
+  for (let d = a; d <= b; d++) w[d - 1] = r() < 0.75 ? '晴' : '阴';
+  const c = randint(r, b + 3, Math.min(b + 6, DAYS - 3));
+  for (let d = c; d < c + 3; d++) w[d - 1] = '雨';
+  w[0] = '阴';
+  return w;
+}
+
+function newPlant(R, m, h, bad, gen) {
+  return { R: R, hist: Array(LAG + 1).fill(R), m: m, h: h, bad: bad, dead: false, loose: 0, rot: 0, gen: gen, deadday: null };
+}
+
+function newState(seed) {
+  const r = rng(seed);
+  const bad = Math.floor(rng(seed * 31 + 7)() * N);
+  const p = [];
+  for (let i = 0; i < N; i++) {
+    p.push(newPlant(5.4 + (r() - 0.5) * 0.4, 5.5 + (r() - 0.5), 10 + (r() - 0.5) * 2, i === bad, 1));
+  }
+  const acts = [], leaves = [];
+  for (let i = 0; i < N; i++) { acts.push({}); leaves.push({}); }
+  return { seed: seed, day: 1, w: weatherFor(seed), p: p, spare: SPARE, done: false, acts: acts, leaves: leaves };
+}
+
+function shownR(pl) { return pl.hist.length > LAG ? pl.hist[pl.hist.length - 1 - LAG] : pl.hist[0]; }
+
+function leafWord(R) {
+  if (R >= 7) return '挺，深绿';
+  if (R >= 5) return '绿';
+  if (R >= 3.5) return '绿，有点软';
+  if (R >= 2) return '耷拉着';
+  if (R > 0) return '黄了，卷边';
+  return '干了';
+}
+function leafMark(R) {
+  if (R >= 7) return '深';
+  if (R >= 5) return '绿';
+  if (R >= 3.5) return '软';
+  if (R >= 2) return '耷';
+  if (R > 0) return '黄';
+  return '干';
+}
+function leafColor(R) {
+  if (R >= 7) return '#2f7d32';
+  if (R >= 5) return '#5aa647';
+  if (R >= 3.5) return '#97c05a';
+  if (R >= 2) return '#c2c35a';
+  if (R > 0) return '#d6a73c';
+  return '#a08a6a';
+}
+function soilWord(m) {
+  if (m < 2) return '干裂了';
+  if (m < 4) return '发白';
+  if (m < 8) return '潮';
+  if (m < 10) return '湿';
+  return '积着水';
+}
+function soilColor(m) {
+  if (m < 2) return '#d9c9a3';
+  if (m < 4) return '#c9b48a';
+  if (m < 8) return '#8f6a43';
+  if (m < 10) return '#6b4a2c';
+  return '#5d6f7a';
+}
+
+function stepDay(st) {
+  const d = st.day, w = st.w[d - 1];
+  st.p.forEach(function (pl, i) {
+    let dm = { '雨': 3.5, '阴': -0.2, '晴': -0.65 }[w];
+    if (pl.m > 8 && w !== '雨') dm -= 0.8;
+    if (pl.loose > 0 && w !== '雨') dm -= 0.7;
+    pl.m = Math.max(0, Math.min(12, pl.m + dm));
+    if (pl.loose > 0) pl.loose -= 1;
+    if (!pl.dead) {
+      let R = pl.R;
+      if (pl.m < 2) R -= 0.7;
+      else if (pl.m > 9.5) { R -= 0.6; pl.rot += 1; }
+      else if (R < 10) R += 0.25;
+      if (pl.bad) R -= 0.6;
+      pl.R = R;
+      if (R <= 0) { pl.R = 0; pl.dead = true; pl.deadday = d; }
+      else pl.h += Math.max(0, R - 3) * 0.3;
+    }
+    pl.hist.push(pl.R);
+    st.leaves[i][d] = shownR(pl);
+  });
+  st.day += 1;
+}
+
+function roots(pl) {
+  const white = Math.max(0, Math.round(pl.R));
+  const brown = Math.min(6, Math.floor(pl.rot / 2) + (pl.bad ? 2 : 0) + (pl.R < 2 ? 1 : 0));
+  return '白根 ' + white + ' 条' + (brown ? '，褐的烂根 ' + brown + ' 条' : '，没看见烂的');
+}
+
+let ST = null, CTRL = null;
+
+function control(seed) {
+  const c = newState(seed);
+  while (c.day <= DAYS) stepDay(c);
+  return c;
+}
+
+function mark(i, what) {
+  const a = ST.acts[i];
+  (a[ST.day] = a[ST.day] || []).push(what);
+}
+
+function say(text) {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.innerHTML = '<span class="d">第 ' + Math.min(ST.day, DAYS) + ' 天</span>　' + text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function plantSVG(pl) {
+  const sR = shownR(pl);
+  const soil = soilColor(pl.m);
+  const hpx = Math.min(140, 18 + pl.h * 2.2);
+  const base = 160, x = 50;
+  const col = leafColor(sR);
+  const droop = sR < 2 ? 22 : (sR < 3.5 ? 12 : (sR < 5 ? 5 : 0));
+  let s = '<svg viewBox="0 0 100 180">';
+  s += '<rect x="0" y="' + base + '" width="100" height="20" fill="' + soil + '"/>';
+  if (pl.m < 2) s += '<path d="M15 ' + (base + 4) + ' l6 6 l-3 6 M60 ' + (base + 3) + ' l-5 7 l4 6 M80 ' + (base + 5) + ' l5 5" stroke="#a8946a" stroke-width="1" fill="none"/>';
+  if (pl.m >= 10) s += '<rect x="5" y="' + (base - 3) + '" width="90" height="4" rx="2" fill="#8fb4c9" opacity="0.8"/>';
+  const top = base - hpx;
+  if (sR <= 0) {
+    s += '<line x1="' + x + '" y1="' + base + '" x2="' + (x + 6) + '" y2="' + top + '" stroke="#8a7458" stroke-width="2"/>';
+  } else {
+    s += '<line x1="' + x + '" y1="' + base + '" x2="' + x + '" y2="' + top + '" stroke="#6b5a3e" stroke-width="2.4"/>';
+    const n = Math.max(2, Math.min(7, Math.round(pl.h / 7)));
+    for (let k = 0; k < n; k++) {
+      const y = top + 6 + k * (hpx - 20) / n;
+      const side = k % 2 === 0 ? -1 : 1;
+      const lx = x + side * 15, ly = y + droop;
+      s += '<ellipse cx="' + lx + '" cy="' + ly + '" rx="11" ry="5" fill="' + col + '" transform="rotate(' + (side * (droop * 2 - 15)) + ' ' + lx + ' ' + ly + ')"/>';
+    }
+    s += '<ellipse cx="' + x + '" cy="' + (top + droop / 2) + '" rx="7" ry="9" fill="' + col + '"/>';
+  }
+  s += '</svg>';
+  return s;
+}
+
+function render() {
+  const d = Math.min(ST.day, DAYS);
+  document.getElementById('day').textContent = ST.done ? '一个月了。' : '第 ' + d + ' 天，' + ST.w[d - 1] + '。';
+  const yard = document.getElementById('yard');
+  yard.innerHTML = '';
+  ST.p.forEach(function (pl, i) {
+    const sR = shownR(pl);
+    const div = document.createElement('div');
+    div.className = 'plot';
+    let html = plantSVG(pl);
+    html += '<div class="info"><b>' + (i + 1) + '号</b>' + (pl.gen > 1 ? '（补的）' : '') + '<br>' +
+      (sR > 0 ? '高 ' + Math.round(pl.h) + '<br>' : '<br>') +
+      '叶子：' + leafWord(sR) + '<br>土：' + soilWord(pl.m) + '</div>';
+    html += '<div class="btns">' +
+      '<button data-a="浇" data-i="' + i + '">浇</button>' +
+      '<button data-a="挖" data-i="' + i + '">挖开看根</button>' +
+      '<button data-a="摇" data-i="' + i + '">摇一摇</button>' +
+      '<button data-a="补" data-i="' + i + '">换一棵</button></div>';
+    div.innerHTML = html;
+    yard.appendChild(div);
+  });
+  yard.querySelectorAll('button').forEach(function (b) {
+    b.disabled = ST.done;
+    b.onclick = function () { doAct(b.dataset.a, +b.dataset.i); };
+  });
+  document.getElementById('b1').disabled = ST.done;
+  document.getElementById('b3').disabled = ST.done;
+  document.getElementById('spare').textContent = (ST.spare && ST.day <= LAST_REPLANT) ?
+    '备用的苗还有 ' + ST.spare + ' 棵，第 ' + LAST_REPLANT + ' 天以后就换不了了' : '';
+}
+
+function doAct(a, i) {
+  if (ST.done) return;
+  const pl = ST.p[i];
+  if (a === '浇') {
+    pl.m = Math.min(12, pl.m + 3); mark(i, '浇');
+    say('浇了 ' + (i + 1) + '号。土：' + soilWord(pl.m));
+  } else if (a === '挖') {
+    if (pl.dead && shownR(pl) <= 0) { say((i + 1) + '号已经干了。'); return; }
+    const s = roots(pl);
+    if (!pl.dead) { pl.R -= 1.2; if (pl.R <= 0) pl.R = 0.01; }
+    pl.loose = 3; mark(i, '挖');
+    say('扒开 ' + (i + 1) + '号根边上的土看：' + s + '。看完又把土拢回去了，土是松的。');
+  } else if (a === '摇') {
+    const firm = pl.R >= 4;
+    if (!pl.dead) { pl.R -= 0.8; if (pl.R <= 0) pl.R = 0.01; }
+    mark(i, '摇');
+    say('捏着 ' + (i + 1) + '号的干晃了晃：' + (firm ? '晃不动，扎得挺稳。' : '底下有点活动。'));
+  } else if (a === '补') {
+    if (ST.spare <= 0) { say('备用的苗没了。'); return; }
+    if (ST.day > LAST_REPLANT) { say('这时候再换，一个月里长不起来了，备用的苗留着吧。'); return; }
+    const s = roots(pl);
+    ST.spare -= 1;
+    const np = newPlant(5.0, Math.max(pl.m, 6), 10, false, pl.gen + 1);
+    np.loose = 3;
+    ST.p[i] = np; mark(i, '补');
+    say('把 ' + (i + 1) + '号拔了，拔出来看根：' + s + '。换上一棵新苗，浇透了。备用的还有 ' + ST.spare + ' 棵。');
+  }
+  render();
+}
+
+function pass(k) {
+  for (let n = 0; n < k; n++) {
+    if (ST.day > DAYS) break;
+    stepDay(ST);
+    if (ST.day > DAYS) { ST.done = true; break; }
+  }
+  if (ST.done) finish();
+  render();
+}
+
+function finish() {
+  CTRL = control(ST.seed);
+  const end = document.getElementById('end');
+  let h = '<p>每一号两行，一天一格是那天的叶子：上面一行是你的，下面一行是同样的天气、同样的苗、谁也没碰的。你那一行上头标着那天你动的手（水＝浇　挖＝挖　摇＝摇　换＝换了一棵）。</p>';
+  h += '<p style="font-size:13px;color:#555">';
+  [['深绿，挺', 8], ['绿', 6], ['有点软', 4], ['耷拉', 2.5], ['黄了', 1], ['干了', 0]].forEach(function (x) {
+    h += '<span class="k" style="background:' + leafColor(x[1]) + '"></span>' + x[0];
+  });
+  h += '</p><table><tr><td class="lab">天</td>';
+  for (let d = 1; d <= DAYS; d++) h += '<td style="color:#999;font-size:11px">' + d + '</td>';
+  h += '<td></td></tr>';
+  const fin = function (pl) { return pl.dead ? '死在第 ' + pl.deadday + ' 天（根）' : '高 ' + Math.round(pl.h); };
+  const lc = function (L, i, d, start) { const R = (L[i][d] !== undefined) ? L[i][d] : start; return '<td title="' + leafWord(R) + '" style="background:' + leafColor(R) + '"></td>'; };
+  for (let i = 0; i < N; i++) {
+    h += '<tr class="act"><td class="lab"></td>';
+    for (let d = 1; d <= DAYS; d++) {
+      const a = ST.acts[i][d] || [];
+      let c = '';
+      if (a.indexOf('补') >= 0) c = '换';
+      else if (a.indexOf('挖') >= 0) c = '挖';
+      else if (a.indexOf('摇') >= 0) c = '摇';
+      else if (a.indexOf('浇') >= 0) c = '水';
+      h += '<td>' + c + '</td>';
+    }
+    h += '<td></td></tr><tr><td class="lab">' + (i + 1) + '号 你的</td>';
+    for (let d = 1; d <= DAYS; d++) h += lc(ST.leaves, i, d, CTRL.p[i].hist[0]);
+    h += '<td class="fin">' + fin(ST.p[i]) + '</td></tr><tr><td class="lab">没碰的</td>';
+    for (let d = 1; d <= DAYS; d++) h += lc(CTRL.leaves, i, d, CTRL.p[i].hist[0]);
+    h += '<td class="fin">' + fin(CTRL.p[i]) + '</td></tr><tr class="gap"><td></td></tr>';
+  }
+  h += '<tr><td class="lab">天气</td>';
+  for (let d = 1; d <= DAYS; d++) h += '<td style="font-size:11px;color:#666">' + ST.w[d - 1] + '</td>';
+  h += '<td></td></tr></table>';
+  h += '<div id="again"><button id="same">同样的一个月再来一回</button> <button id="other">换一个月</button></div>';
+  end.innerHTML = h;
+  end.style.display = 'block';
+  document.getElementById('same').onclick = function () { start(ST.seed); };
+  document.getElementById('other').onclick = function () { start(1 + Math.floor(Math.random() * 99999)); };
+  end.scrollIntoView({ behavior: 'smooth' });
+}
+
+function start(seed) {
+  ST = newState(seed);
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('end').style.display = 'none';
+  render();
+}
+
+document.getElementById('b1').onclick = function () { pass(1); };
+document.getElementById('b3').onclick = function () { pass(3); };
+const q = new URLSearchParams(location.search).get('seed');
+start(q ? (parseInt(q, 10) || 3) : 3);
+</script>
+</body>
+</html>
